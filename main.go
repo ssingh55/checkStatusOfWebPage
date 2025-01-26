@@ -1,11 +1,19 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"time"
+	"strings"
 )
+
+// Response struct defines the JSON response format
+type Response struct {
+	Status  int    `json:"status"`
+	Message string `json:"message"`
+}
 
 func main() {
 	http.HandleFunc("/", handleIndex)
@@ -25,7 +33,6 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 			function checkUrl() {
 				const urlInput = document.getElementById('urlInput').value;
 				
-				// Send request to server
 				fetch('/check', {
 					method: 'POST',
 					headers: {
@@ -40,14 +47,12 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 						'✅ Status 200 OK' : 
 						`+"`❌ Status ${data.status} (${data.message})`;"+`
 					
-					// Store result in sessionStorage
 					const historyItem = {
 						url: urlInput,
 						status: data.status,
 						timestamp: new Date().toISOString()
 					};
 					
-					// Get existing history or initialize array
 					const history = JSON.parse(sessionStorage.getItem('urlHistory') || '[]');
 					history.push(historyItem);
 					sessionStorage.setItem('urlHistory', JSON.stringify(history));
@@ -64,7 +69,6 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 				).join('');
 			}
 
-			// Load history when page loads
 			window.onload = updateHistoryDisplay;
 		</script>
 	</head>
@@ -89,24 +93,42 @@ func handleCheck(w http.ResponseWriter, r *http.Request) {
 
 	rawURL := r.FormValue("url")
 	if rawURL == "" {
-		http.Error(w, "URL is required", http.StatusBadRequest)
+		sendJSONResponse(w, http.StatusBadRequest, "URL is required")
+		return
+	}
+
+	// Prevent checking the server itself
+	if strings.Contains(rawURL, "localhost:8080") || strings.Contains(rawURL, "127.0.0.1:8080") {
+		sendJSONResponse(w, http.StatusBadRequest, "Cannot check this server's status")
 		return
 	}
 
 	parsedURL, err := url.ParseRequestURI(rawURL)
 	if err != nil {
-		sendJSONResponse(w, http.StatusBadRequest, "Invalid URL")
+		sendJSONResponse(w, http.StatusBadRequest, "Invalid URL format")
 		return
 	}
 
+	// Configure proper HTTP client
 	client := &http.Client{
 		Timeout: 10 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
+			return nil // Follow redirects
 		},
 	}
 
-	resp, err := client.Head(parsedURL.String())
+	// Create proper request with headers
+	req, err := http.NewRequest("GET", parsedURL.String(), nil)
+	if err != nil {
+		sendJSONResponse(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Add browser-like headers
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+	req.Header.Set("Accept", "*/*")
+
+	resp, err := client.Do(req)
 	if err != nil {
 		sendJSONResponse(w, http.StatusInternalServerError, err.Error())
 		return
@@ -118,5 +140,8 @@ func handleCheck(w http.ResponseWriter, r *http.Request) {
 
 func sendJSONResponse(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"status": %d, "message": "%s"}`, status, message)
+	json.NewEncoder(w).Encode(Response{
+		Status:  status,
+		Message: message,
+	})
 }
