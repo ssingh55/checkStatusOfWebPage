@@ -9,7 +9,6 @@ import (
 	"github.com/go-resty/resty/v2"
 )
 
-// Response struct defines the JSON response format
 type Response struct {
 	Status  int    `json:"status"`
 	Message string `json:"message"`
@@ -32,7 +31,20 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		<script>
 			function checkUrl() {
 				const urlInput = document.getElementById('urlInput').value;
-				
+				if (!urlInput) {
+					alert("Please enter a URL");
+					return;
+				}
+
+				// Check if URL already exists in history
+				const history = JSON.parse(sessionStorage.getItem('urlHistory') || '[]');
+				const existingEntry = history.find(entry => entry.url === urlInput);
+				if (existingEntry) {
+					if (!confirm("This URL has already been checked. Refresh its status?")) {
+						return;
+					}
+				}
+
 				fetch('/check', {
 					method: 'POST',
 					headers: {
@@ -45,18 +57,25 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 					const resultDiv = document.getElementById('result');
 					resultDiv.innerHTML = data.status === 200 ? 
 						'✅ Status 200 OK' : 
-						`+"`❌ Status ${data.status} (${data.message})`;"+`
-					
+						'❌ Status ' + data.status + ' (' + data.message + ')';
+
+					// Update or add URL entry in history
 					const historyItem = {
 						url: urlInput,
 						status: data.status,
 						timestamp: new Date().toISOString()
 					};
-					
-					const history = JSON.parse(sessionStorage.getItem('urlHistory') || '[]');
-					history.push(historyItem);
+
+					if (existingEntry) {
+						// Replace existing entry
+						const index = history.findIndex(entry => entry.url === urlInput);
+						history[index] = historyItem;
+					} else {
+						// Add new entry
+						history.push(historyItem);
+					}
+
 					sessionStorage.setItem('urlHistory', JSON.stringify(history));
-					
 					updateHistoryDisplay();
 				});
 			}
@@ -65,8 +84,16 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 				const history = JSON.parse(sessionStorage.getItem('urlHistory') || '[]');
 				const historyList = document.getElementById('historyList');
 				historyList.innerHTML = history.reverse().map(item => 
-					`+"`<li>${new Date(item.timestamp).toLocaleString()} - ${item.url} - Status: ${item.status}</li>`"+`
+					'<li>' +
+					new Date(item.timestamp).toLocaleString() + ' - ' + item.url + ' - Status: ' + item.status +
+					' <button onclick="refreshUrl(\'' + item.url + '\')">Refresh</button>' +
+					'</li>'
 				).join('');
+			}
+
+			function refreshUrl(url) {
+				document.getElementById('urlInput').value = url;
+				checkUrl();
 			}
 
 			window.onload = updateHistoryDisplay;
